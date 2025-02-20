@@ -87,6 +87,17 @@ std::string trim(const std::string &str) {
 }
 
 //---------------------------------------------
+// Helper: sanitize domain for WHOIS queries.
+// Strips common subdomains like "www."
+//---------------------------------------------
+std::string sanitizeDomain(const std::string &domain) {
+    if(domain.find("www.") == 0) {
+        return domain.substr(4);
+    }
+    return domain;
+}
+
+//---------------------------------------------
 // Secured exec() function using a command whitelist.
 // Only commands starting with ping, traceroute, whois, nslookup, or nmap are allowed.
 //---------------------------------------------
@@ -369,7 +380,8 @@ int main() {
     });
 
     // ---------------------------------------------
-    // /whois endpoint
+    // /whois endpoint with input sanitization.
+    // Strips common subdomains (like "www.") before querying.
     // ---------------------------------------------
     CROW_ROUTE(app, "/whois").methods("GET"_method)([](const crow::request &req) {
         // Retrieve the target parameter.
@@ -379,6 +391,9 @@ int main() {
         std::string target(targetParam);
         if (!isAllowedTarget(target))
             return crow::response(400, "Invalid target");
+
+        // Sanitize the domain by stripping "www." if present.
+        target = sanitizeDomain(target);
 
         // Execute the whois command to fetch registration details.
         std::string command = "whois " + target;
