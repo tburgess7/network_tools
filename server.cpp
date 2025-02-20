@@ -116,6 +116,7 @@ int main() {
         std::string targetStr(targetParam);
         if(!isAllowedTarget(targetStr))
             return crow::response(400, "Invalid parameter: target must be a valid IPv4 address or domain name, and not localhost");
+        // Execute the ping command with 4 ICMP packets.
         std::string command = "ping -c 4 " + targetStr;
         std::string output = exec(command.c_str());
         crow::json::wvalue result;
@@ -123,165 +124,234 @@ int main() {
         return crow::response(result);
     });
 
-// /portscan endpoint using nmap (with blocking of burgess.services by domain or IP)
-CROW_ROUTE(app, "/portscan").methods("GET"_method)([&](const crow::request &req) {
-    auto targetParam = req.url_params.get("target");
-    if (!targetParam)
-        return crow::response(400, "Missing target parameter");
-    std::string targetStr(targetParam);
+    // /portscan endpoint using nmap (with blocking of burgess.services by domain or IP)
+    CROW_ROUTE(app, "/portscan").methods("GET"_method)([&](const crow::request &req) {
+        auto targetParam = req.url_params.get("target");
+        if (!targetParam)
+            return crow::response(400, "Missing target parameter");
+        std::string targetStr(targetParam);
 
-    // Block scanning if target equals "burgess.services" or "www.burgess.services"
-    if (targetStr == "burgess.services" || targetStr == "www.burgess.services") {
-        return crow::response(400, "Scanning this domain is not allowed");
-    }
-    
-    // Resolve the IP for burgess.services and block if the target IP matches.
-    std::string blockedIP = resolveDomainToIP("burgess.services");
-    if (isValidIP(targetStr) && targetStr == blockedIP) {
-        return crow::response(400, "Scanning this domain is not allowed");
-    }
-    
-    // If target is a domain, resolve it.
-    if (!isValidIP(targetStr) && isValidDomain(targetStr)) {
-        std::string resolvedIP = resolveDomainToIP(targetStr);
-        if (resolvedIP.empty())
-            return crow::response(400, "Unable to resolve domain name to IPv4 address");
-        targetStr = resolvedIP;
-    }
-    if (!isAllowedIP(targetStr) || isPrivateIP(targetStr))
-        return crow::response(400, "Scanning private IP ranges is not allowed");
+        // Block scanning if target equals "burgess.services" or "www.burgess.services"
+        if (targetStr == "burgess.services" || targetStr == "www.burgess.services") {
+            return crow::response(400, "Scanning this domain is not allowed");
+        }
+        
+        // Resolve the IP for burgess.services and block if the target IP matches.
+        std::string blockedIP = resolveDomainToIP("burgess.services");
+        if (isValidIP(targetStr) && targetStr == blockedIP) {
+            return crow::response(400, "Scanning this domain is not allowed");
+        }
+        
+        // If target is a domain, resolve it.
+        if (!isValidIP(targetStr) && isValidDomain(targetStr)) {
+            std::string resolvedIP = resolveDomainToIP(targetStr);
+            if (resolvedIP.empty())
+                return crow::response(400, "Unable to resolve domain name to IPv4 address");
+            targetStr = resolvedIP;
+        }
+        if (!isAllowedIP(targetStr) || isPrivateIP(targetStr))
+            return crow::response(400, "Scanning private IP ranges is not allowed");
 
-    crow::json::wvalue result;
-    auto portParam = req.url_params.get("port");
-    auto portStartParam = req.url_params.get("port_start");
-    auto portEndParam = req.url_params.get("port_end");
-    int startPort = 0, endPort = 0;
-    
-    if (portStartParam && portEndParam) {
-        try {
-            startPort = std::stoi(portStartParam);
-            endPort = std::stoi(portEndParam);
-        } catch (...) {
-            return crow::response(400, "Invalid port range values");
-        }
-        if (startPort < 1 || endPort > 65535 || startPort > endPort)
-            return crow::response(400, "Port range out of bounds or invalid");
+        crow::json::wvalue result;
+        auto portParam = req.url_params.get("port");
+        auto portStartParam = req.url_params.get("port_start");
+        auto portEndParam = req.url_params.get("port_end");
+        int startPort = 0, endPort = 0;
         
-        // Build nmap command for range scan.
-        std::string nmapCommand = "nmap -p " + std::to_string(startPort) + "-" + std::to_string(endPort)
-                                    + " " + targetStr + " -oX -";
-        std::string nmapOutput = exec(nmapCommand.c_str());
-        
-        // Parse XML output for TCP port states.
-        std::regex portRegex("<port protocol=\"tcp\" portid=\"(\\d+)\">.*?<state state=\"([^\"]+)\"");
-        std::smatch match;
-        std::string::const_iterator searchStart(nmapOutput.cbegin());
-        std::vector<std::pair<int, std::string>> ports;
-        while (std::regex_search(searchStart, nmapOutput.cend(), match, portRegex)) {
-            int port = std::stoi(match[1].str());
-            std::string state = match[2].str();
-            ports.push_back(std::make_pair(port, state));
-            searchStart = match.suffix().first;
-        }
-        std::sort(ports.begin(), ports.end(),
-            [](const std::pair<int, std::string> &a, const std::pair<int, std::string> &b) {
-                return a.first < b.first;
+        if (portStartParam && portEndParam) {
+            try {
+                startPort = std::stoi(portStartParam);
+                endPort = std::stoi(portEndParam);
+            } catch (...) {
+                return crow::response(400, "Invalid port range values");
             }
-        );
-        std::vector<bool> portResults;
-        for (int p = startPort; p <= endPort; ++p) {
-            bool open = false;
-            for (size_t i = 0; i < ports.size(); ++i) {
-                if (ports[i].first == p) {
-                    open = (ports[i].second == "open");
-                    break;
+            if (startPort < 1 || endPort > 65535 || startPort > endPort)
+                return crow::response(400, "Port range out of bounds or invalid");
+            
+            // Build nmap command for range scan.
+            std::string nmapCommand = "nmap -p " + std::to_string(startPort) + "-" + std::to_string(endPort)
+                                        + " " + targetStr + " -oX -";
+            std::string nmapOutput = exec(nmapCommand.c_str());
+            
+            // Parse XML output for TCP port states.
+            std::regex portRegex("<port protocol=\"tcp\" portid=\"(\\d+)\">.*?<state state=\"([^\"]+)\"");
+            std::smatch match;
+            std::string::const_iterator searchStart(nmapOutput.cbegin());
+            std::vector<std::pair<int, std::string>> ports;
+            while (std::regex_search(searchStart, nmapOutput.cend(), match, portRegex)) {
+                int port = std::stoi(match[1].str());
+                std::string state = match[2].str();
+                ports.push_back(std::make_pair(port, state));
+                searchStart = match.suffix().first;
+            }
+            std::sort(ports.begin(), ports.end(),
+                [](const std::pair<int, std::string> &a, const std::pair<int, std::string> &b) {
+                    return a.first < b.first;
+                }
+            );
+            std::vector<bool> portResults;
+            for (int p = startPort; p <= endPort; ++p) {
+                bool open = false;
+                for (size_t i = 0; i < ports.size(); ++i) {
+                    if (ports[i].first == p) {
+                        open = (ports[i].second == "open");
+                        break;
+                    }
+                }
+                portResults.push_back(open);
+            }
+            // If scanning a single port via range, handle it as a single port.
+            if (startPort == endPort) {
+                result["target"] = targetStr;
+                result["port"] = std::to_string(startPort);
+                result["open"] = portResults.empty() ? false : portResults[0];
+                return crow::response(result);
+            }
+            // Group consecutive ports.
+            std::vector<crow::json::wvalue> openGroups;
+            std::vector<crow::json::wvalue> closedGroups;
+            int currentStart = startPort;
+            bool currentState = portResults[0];
+            for (int p = startPort + 1; p <= endPort; ++p) {
+                bool state = portResults[p - startPort];
+                if (state != currentState) {
+                    crow::json::wvalue group;
+                    group["start"] = currentStart;
+                    group["end"] = p - 1;
+                    if (currentState)
+                        openGroups.push_back(std::move(group));
+                    else
+                        closedGroups.push_back(std::move(group));
+                    currentState = state;
+                    currentStart = p;
                 }
             }
-            portResults.push_back(open);
-        }
-        // If scanning a single port via range, handle it as a single port.
-        if (startPort == endPort) {
-            result["target"] = targetStr;
-            result["port"] = std::to_string(startPort);
-            result["open"] = portResults.empty() ? false : portResults[0];
-            return crow::response(result);
-        }
-        // Group consecutive ports.
-        std::vector<crow::json::wvalue> openGroups;
-        std::vector<crow::json::wvalue> closedGroups;
-        int currentStart = startPort;
-        bool currentState = portResults[0];
-        for (int p = startPort + 1; p <= endPort; ++p) {
-            bool state = portResults[p - startPort];
-            if (state != currentState) {
+            {
                 crow::json::wvalue group;
                 group["start"] = currentStart;
-                group["end"] = p - 1;
+                group["end"] = endPort;
                 if (currentState)
                     openGroups.push_back(std::move(group));
                 else
                     closedGroups.push_back(std::move(group));
-                currentState = state;
-                currentStart = p;
             }
+            // Build JSON objects with numeric keys.
+            crow::json::wvalue openRangesObj;
+            for (size_t i = 0; i < openGroups.size(); i++) {
+                openRangesObj[std::to_string(i)] = std::move(openGroups[i]);
+            }
+            crow::json::wvalue closedRangesObj;
+            for (size_t i = 0; i < closedGroups.size(); i++) {
+                closedRangesObj[std::to_string(i)] = std::move(closedGroups[i]);
+            }
+            bool overall = false;
+            for (bool b : portResults) {
+                if (b) { overall = true; break; }
+            }
+            result["target"] = targetStr;
+            result["scan_range"]["start"] = startPort;
+            result["scan_range"]["end"] = endPort;
+            result["port"] = std::to_string(startPort) + "-" + std::to_string(endPort);
+            result["overall"] = overall;
+            result["status"] = overall ? "Open" : "Closed";
+            result["open_ranges"] = std::move(openRangesObj);
+            result["closed_ranges"] = std::move(closedRangesObj);
+        } else if (portParam) {
+            int port = 0;
+            try {
+                port = std::stoi(portParam);
+            } catch (...) {
+                return crow::response(400, "Invalid port value");
+            }
+            if (port < 1 || port > 65535)
+                return crow::response(400, "Port number out of range (1-65535)");
+            std::string nmapCommand = "nmap -p " + std::to_string(port) + " " + targetStr + " -oX -";
+            std::string nmapOutput = exec(nmapCommand.c_str());
+            std::regex portRegex("<port protocol=\"tcp\" portid=\"(\\d+)\">.*?<state state=\"([^\"]+)\"");
+            std::smatch match;
+            bool open = false;
+            if (std::regex_search(nmapOutput, match, portRegex)) {
+                open = (match[2].str() == "open");
+            }
+            crow::json::wvalue result;
+            result["target"] = targetStr;
+            result["port"] = std::to_string(port);
+            result["open"] = open;
+            return crow::response(result);
+        } else {
+            return crow::response(400, "Missing port parameter. Specify either 'port' or both 'port_start' and 'port_end'");
         }
-        {
-            crow::json::wvalue group;
-            group["start"] = currentStart;
-            group["end"] = endPort;
-            if (currentState)
-                openGroups.push_back(std::move(group));
-            else
-                closedGroups.push_back(std::move(group));
-        }
-        // Build JSON objects with numeric keys.
-        crow::json::wvalue openRangesObj;
-        for (size_t i = 0; i < openGroups.size(); i++) {
-            openRangesObj[std::to_string(i)] = std::move(openGroups[i]);
-        }
-        crow::json::wvalue closedRangesObj;
-        for (size_t i = 0; i < closedGroups.size(); i++) {
-            closedRangesObj[std::to_string(i)] = std::move(closedGroups[i]);
-        }
-        bool overall = false;
-        for (bool b : portResults) {
-            if (b) { overall = true; break; }
-        }
-        result["target"] = targetStr;
-        result["scan_range"]["start"] = startPort;
-        result["scan_range"]["end"] = endPort;
-        result["port"] = std::to_string(startPort) + "-" + std::to_string(endPort);
-        result["overall"] = overall;
-        result["status"] = overall ? "Open" : "Closed";
-        result["open_ranges"] = std::move(openRangesObj);
-        result["closed_ranges"] = std::move(closedRangesObj);
-    } else if (portParam) {
-        int port = 0;
-        try {
-            port = std::stoi(portParam);
-        } catch (...) {
-            return crow::response(400, "Invalid port value");
-        }
-        if (port < 1 || port > 65535)
-            return crow::response(400, "Port number out of range (1-65535)");
-        std::string nmapCommand = "nmap -p " + std::to_string(port) + " " + targetStr + " -oX -";
-        std::string nmapOutput = exec(nmapCommand.c_str());
-        std::regex portRegex("<port protocol=\"tcp\" portid=\"(\\d+)\">.*?<state state=\"([^\"]+)\"");
-        std::smatch match;
-        bool open = false;
-        if (std::regex_search(nmapOutput, match, portRegex)) {
-            open = (match[2].str() == "open");
-        }
-        crow::json::wvalue result;
-        result["target"] = targetStr;
-        result["port"] = std::to_string(port);
-        result["open"] = open;
         return crow::response(result);
-    } else {
-        return crow::response(400, "Missing port parameter. Specify either 'port' or both 'port_start' and 'port_end'");
-    }
-    return crow::response(result);
-});
+    });
+
+    // ---------------------------------------------
+    // New endpoint for traceroute
+    // ---------------------------------------------
+    CROW_ROUTE(app, "/traceroute").methods("GET"_method)([](const crow::request &req) {
+        // Get the target parameter from the query string.
+        auto targetParam = req.url_params.get("target");
+        if (!targetParam)
+            return crow::response(400, "Missing target parameter");
+        std::string target(targetParam);
+        if (!isAllowedTarget(target))
+            return crow::response(400, "Invalid target");
+
+        // Construct and execute the traceroute command.
+        // This will trace the network path to the given target.
+        std::string command = "traceroute " + target;
+        std::string output = exec(command.c_str());
+
+        // Return the command output in JSON format.
+        crow::json::wvalue result;
+        result["result"] = output;
+        return crow::response(result);
+    });
+
+    // ---------------------------------------------
+    // New endpoint for whois
+    // ---------------------------------------------
+    CROW_ROUTE(app, "/whois").methods("GET"_method)([](const crow::request &req) {
+        // Get the target parameter from the query string.
+        auto targetParam = req.url_params.get("target");
+        if (!targetParam)
+            return crow::response(400, "Missing target parameter");
+        std::string target(targetParam);
+        if (!isAllowedTarget(target))
+            return crow::response(400, "Invalid target");
+
+        // Construct and execute the whois command.
+        // This command retrieves the registration and network info for the target domain or IP.
+        std::string command = "whois " + target;
+        std::string output = exec(command.c_str());
+
+        // Return the whois information as JSON.
+        crow::json::wvalue result;
+        result["result"] = output;
+        return crow::response(result);
+    });
+
+    // ---------------------------------------------
+    // New endpoint for nslookup
+    // ---------------------------------------------
+    CROW_ROUTE(app, "/nslookup").methods("GET"_method)([](const crow::request &req) {
+        // Get the target parameter from the query string.
+        auto targetParam = req.url_params.get("target");
+        if (!targetParam)
+            return crow::response(400, "Missing target parameter");
+        std::string target(targetParam);
+        if (!isAllowedTarget(target))
+            return crow::response(400, "Invalid target");
+
+        // Construct and execute the nslookup command.
+        // This command performs a DNS lookup for the target.
+        std::string command = "nslookup " + target;
+        std::string output = exec(command.c_str());
+
+        // Return the DNS lookup results in JSON format.
+        crow::json::wvalue result;
+        result["result"] = output;
+        return crow::response(result);
+    });
 
     // Catch-all OPTIONS route.
     CROW_ROUTE(app, "/<path>")
