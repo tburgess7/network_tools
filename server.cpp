@@ -8,6 +8,7 @@
 #include <sstream>
 #include <algorithm>
 #include <future>
+#include <cctype>
 
 // Standard UNIX headers for exec functions and DNS resolution
 #include <sys/socket.h>
@@ -75,15 +76,50 @@ std::string resolveDomainToIP(const std::string &domain) {
 }
 
 //---------------------------------------------
-// Helper: exec() for shell commands
+// Helper: trim whitespace from string
+//---------------------------------------------
+std::string trim(const std::string &str) {
+    size_t first = str.find_first_not_of(" \t\n\r");
+    if(first == std::string::npos)
+        return "";
+    size_t last = str.find_last_not_of(" \t\n\r");
+    return str.substr(first, (last - first + 1));
+}
+
+//---------------------------------------------
+// Secured exec() function using a command whitelist.
+// Only commands starting with ping, traceroute, whois, nslookup, or nmap are allowed.
 //---------------------------------------------
 std::string exec(const char *cmd) {
+    std::string command = trim(cmd);
+    // Allowed command prefixes.
+    const std::vector<std::string> allowedCommands = {
+        "ping",
+        "traceroute",
+        "whois",
+        "nslookup",
+        "nmap"  // Used for portscan endpoint.
+    };
+
+    // Check if the command starts with one of the allowed commands.
+    bool isAllowed = false;
+    for (const auto &allowed : allowedCommands) {
+        if (command.find(allowed) == 0) {
+            isAllowed = true;
+            break;
+        }
+    }
+
+    if (!isAllowed) {
+        return "Command not allowed!";
+    }
+
     std::array<char,128> buffer;
     std::string result;
-    FILE *pipe = popen(cmd, "r");
-    if(!pipe)
+    FILE *pipe = popen(command.c_str(), "r");
+    if (!pipe)
         return "popen failed!";
-    while(fgets(buffer.data(), buffer.size(), pipe) != nullptr)
+    while (fgets(buffer.data(), buffer.size(), pipe) != nullptr)
         result += buffer.data();
     pclose(pipe);
     return result;
@@ -108,7 +144,9 @@ struct CORS {
 int main() {
     crow::App<CORS> app;
 
-    // /ping endpoint (omitted for brevity; unchanged)
+    // ---------------------------------------------
+    // /ping endpoint
+    // ---------------------------------------------
     CROW_ROUTE(app, "/ping").methods("GET"_method)([](const crow::request &req) {
         auto targetParam = req.url_params.get("target");
         if(!targetParam)
@@ -124,7 +162,10 @@ int main() {
         return crow::response(result);
     });
 
-    // /portscan endpoint using nmap (with blocking of burgess.services by domain or IP)
+    // ---------------------------------------------
+    // /portscan endpoint using nmap.
+    // Blocks scanning of burgess.services by domain or IP.
+    // ---------------------------------------------
     CROW_ROUTE(app, "/portscan").methods("GET"_method)([&](const crow::request &req) {
         auto targetParam = req.url_params.get("target");
         if (!targetParam)
@@ -285,10 +326,11 @@ int main() {
     });
 
     // ---------------------------------------------
-    // New endpoint for traceroute
+    // /traceroute endpoint with restricted hops.
+    // Replaces the first two hop lines (after the header) with a custom message.
     // ---------------------------------------------
     CROW_ROUTE(app, "/traceroute").methods("GET"_method)([](const crow::request &req) {
-        // Get the target parameter from the query string.
+        // Retrieve the target parameter from the query string.
         auto targetParam = req.url_params.get("target");
         if (!targetParam)
             return crow::response(400, "Missing target parameter");
@@ -296,22 +338,41 @@ int main() {
         if (!isAllowedTarget(target))
             return crow::response(400, "Invalid target");
 
-        // Construct and execute the traceroute command.
-        // This will trace the network path to the given target.
+        // Execute the traceroute command.
         std::string command = "traceroute " + target;
         std::string output = exec(command.c_str());
 
-        // Return the command output in JSON format.
+        // Split the output into individual lines.
+        std::istringstream iss(output);
+        std::string line;
+        std::vector<std::string> lines;
+        while (std::getline(iss, line)) {
+            lines.push_back(line);
+        }
+        
+        // Assuming the first line is the header, replace the first two hop lines (if available).
+        if (lines.size() > 1) {
+            lines[1] = "1 *** RESTRICTED ***";  // Replace first hop.
+            if (lines.size() > 2)
+                lines[2] = "2 *** RESTRICTED ***";  // Replace second hop.
+        }
+        
+        // Reassemble the modified lines.
+        std::string modified_output;
+        for (const auto &l : lines) {
+            modified_output += l + "\n";
+        }
+        
         crow::json::wvalue result;
-        result["result"] = output;
+        result["result"] = modified_output;
         return crow::response(result);
     });
 
     // ---------------------------------------------
-    // New endpoint for whois
+    // /whois endpoint
     // ---------------------------------------------
     CROW_ROUTE(app, "/whois").methods("GET"_method)([](const crow::request &req) {
-        // Get the target parameter from the query string.
+        // Retrieve the target parameter.
         auto targetParam = req.url_params.get("target");
         if (!targetParam)
             return crow::response(400, "Missing target parameter");
@@ -319,22 +380,21 @@ int main() {
         if (!isAllowedTarget(target))
             return crow::response(400, "Invalid target");
 
-        // Construct and execute the whois command.
-        // This command retrieves the registration and network info for the target domain or IP.
+        // Execute the whois command to fetch registration details.
         std::string command = "whois " + target;
         std::string output = exec(command.c_str());
 
-        // Return the whois information as JSON.
         crow::json::wvalue result;
         result["result"] = output;
         return crow::response(result);
     });
 
     // ---------------------------------------------
-    // New endpoint for nslookup
+    // /nslookup endpoint with header removal.
+    // Removes the "Server:" and "Address:" header block from the output.
     // ---------------------------------------------
     CROW_ROUTE(app, "/nslookup").methods("GET"_method)([](const crow::request &req) {
-        // Get the target parameter from the query string.
+        // Retrieve the target parameter.
         auto targetParam = req.url_params.get("target");
         if (!targetParam)
             return crow::response(400, "Missing target parameter");
@@ -342,18 +402,34 @@ int main() {
         if (!isAllowedTarget(target))
             return crow::response(400, "Invalid target");
 
-        // Construct and execute the nslookup command.
-        // This command performs a DNS lookup for the target.
+        // Execute the nslookup command.
         std::string command = "nslookup " + target;
         std::string output = exec(command.c_str());
 
-        // Return the DNS lookup results in JSON format.
+        // Process the output to remove the header block.
+        // This skips all lines until an empty line is encountered.
+        std::istringstream iss(output);
+        std::string line;
+        std::string filteredOutput;
+        bool headerEnded = false;
+        while (std::getline(iss, line)) {
+            if (!headerEnded) {
+                if (line.empty()) {
+                    headerEnded = true;
+                }
+                continue;
+            }
+            filteredOutput += line + "\n";
+        }
+
         crow::json::wvalue result;
-        result["result"] = output;
+        result["result"] = filteredOutput;
         return crow::response(result);
     });
 
+    // ---------------------------------------------
     // Catch-all OPTIONS route.
+    // ---------------------------------------------
     CROW_ROUTE(app, "/<path>")
         .methods("OPTIONS"_method)([](const crow::request &req, const std::string &/*path*/) {
             crow::response res;
@@ -364,6 +440,7 @@ int main() {
             return res;
         });
 
+    // Run the server on port 18080 with multithreading enabled.
     app.port(18080).multithreaded().run();
     return 0;
 }
