@@ -4,69 +4,14 @@
   <meta charset="UTF-8">
   <title>Network Tools Web App</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 0;
-      background-color: #f4f4f4;
-    }
-    .container {
-      max-width: 800px;
-      margin: 20px auto;
-      background-color: #fff;
-      padding: 20px;
-      border-radius: 8px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-    }
-    h1, h2 {
-      text-align: center;
-    }
-    form {
-      margin-bottom: 20px;
-    }
-    label {
-      display: block;
-      margin-top: 10px;
-      font-weight: bold;
-    }
-    input, select, button {
-      width: 100%;
-      padding: 10px;
-      margin-top: 5px;
-      font-size: 16px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-    }
-    button {
-      background-color: #28a745;
-      color: #fff;
-      border: none;
-      cursor: pointer;
-    }
-    button:hover {
-      background-color: #218838;
-    }
-    pre {
-      background-color: #f8f9fa;
-      border: 1px solid #ddd;
-      padding: 15px;
-      border-radius: 4px;
-      white-space: pre-wrap;
-      font-family: "Courier New", Courier, monospace;
-      overflow-x: auto;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 10px;
-    }
-    th, td {
-      border: 1px solid #ccc;
-      padding: 8px;
-      text-align: center;
-    }
-    th {
-      background-color: #f0f0f0;
-    }
+    body { font-family: Arial, sans-serif; padding: 20px; background: #f4f4f4; }
+    .container { max-width: 800px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    h1 { text-align: center; }
+    label { display: block; margin-top: 10px; font-weight: bold; }
+    input, select, button { width: 100%; padding: 10px; margin-top: 5px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; }
+    button { background: #28a745; color: #fff; border: none; cursor: pointer; }
+    button:hover { background: #218838; }
+    pre { background: #f8f9fa; border: 1px solid #ddd; padding: 15px; border-radius: 4px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -81,106 +26,82 @@
         <option value="nslookup">NSLookup</option>
         <option value="portscan">Port Scan</option>
       </select>
-      
-      <label for="targetInput">Target (IPv4 address or domain):</label>
-      <input type="text" id="targetInput" placeholder="e.g. 8.8.8.8 or example.com" required>
-      
-      <div id="portDiv" style="display: none;">
-        <label for="portInput">Port (for single port scan):</label>
+
+      <label for="targetInput">Target (IPv4 or domain):</label>
+      <input type="text" id="targetInput" placeholder="e.g. google.com" required>
+
+      <div id="portFields" style="display: none;">
+        <label for="portInput">Single Port (optional):</label>
         <input type="number" id="portInput" placeholder="e.g. 80">
-        <p style="text-align: center; margin: 10px 0;">or</p>
-        <label>Port Range (for range scan):</label>
-        <input type="number" id="portStartInput" placeholder="Start port">
-        <input type="number" id="portEndInput" placeholder="End port">
+        <label>Or Port Range:</label>
+        <input type="number" id="portStartInput" placeholder="Start Port (e.g. 80)">
+        <input type="number" id="portEndInput" placeholder="End Port (e.g. 81)">
       </div>
-      
+
       <button type="submit">Run Tool</button>
     </form>
-    <h2>Result</h2>
-    <div id="result">
-      <pre>Your output will appear here.</pre>
-    </div>
+    <pre id="result">Results will appear here.</pre>
   </div>
-  
+
   <script>
-    const toolSelect = document.getElementById('toolSelect');
-    const portDiv = document.getElementById('portDiv');
-    const resultDiv = document.getElementById('result');
-    
-    // Show/hide port options if tool is portscan.
-    toolSelect.addEventListener('change', function() {
-      portDiv.style.display = (this.value === 'portscan') ? 'block' : 'none';
+    // Show/hide port fields when "portscan" is selected.
+    const toolSelect = document.getElementById("toolSelect");
+    const portFields = document.getElementById("portFields");
+    toolSelect.addEventListener("change", function(){
+      portFields.style.display = (this.value === "portscan") ? "block" : "none";
     });
-    
-    // Allow pressing Enter in the target input to submit the form.
-    document.getElementById('targetInput').addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        document.getElementById('toolForm').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-      }
-    });
-    
-    document.getElementById('toolForm').addEventListener('submit', function(e) {
+
+    // Handle form submission.
+    document.getElementById("toolForm").addEventListener("submit", function(e){
       e.preventDefault();
-      
       const tool = toolSelect.value;
-      const target = document.getElementById('targetInput').value.trim();
-      if (!target) {
-        resultDiv.innerHTML = "<pre>Please enter a target.</pre>";
-        return;
-      }
-      
+      const target = document.getElementById("targetInput").value.trim();
       let url = "/api/" + tool + "?target=" + encodeURIComponent(target);
-      
-      if (tool === 'portscan') {
-        const port = document.getElementById('portInput').value.trim();
-        const portStart = document.getElementById('portStartInput').value.trim();
-        const portEnd = document.getElementById('portEndInput').value.trim();
-        if (portStart && portEnd) {
-          url += "&port_start=" + encodeURIComponent(portStart) + "&port_end=" + encodeURIComponent(portEnd);
-        } else if (port) {
-          url += "&port=" + encodeURIComponent(port);
-        } else {
-          resultDiv.innerHTML = "<pre>Please provide a port number or a port range.</pre>";
-          return;
-        }
+      if(tool === "portscan"){
+         const port = document.getElementById("portInput").value.trim();
+         const portStart = document.getElementById("portStartInput").value.trim();
+         const portEnd = document.getElementById("portEndInput").value.trim();
+         if(portStart && portEnd){
+             url += "&port_start=" + encodeURIComponent(portStart) + "&port_end=" + encodeURIComponent(portEnd);
+         } else if(port){
+             url += "&port=" + encodeURIComponent(port);
+         }
       }
-      
-      resultDiv.innerHTML = "<pre>Loading...</pre>";
-      
+      document.getElementById("result").textContent = "Loading...";
       fetch(url)
         .then(response => {
-          if (!response.ok) {
-            throw new Error("HTTP error " + response.status);
-          }
+          if(!response.ok) throw new Error("HTTP error " + response.status);
           return response.json();
         })
         .then(data => {
-          // If tool is portscan, format the output nicely.
-          if (tool === "portscan") {
-            let html = "";
-            if (data.results) {
-              // Range scan: display range, and build a table.
-              html += `<p>Port scan for target ${data.target} over range ${data.scan_range.start} - ${data.scan_range.end}:</p>`;
-              html += `<table><thead><tr><th>Port</th><th>Status</th></tr></thead><tbody>`;
-              for (let port in data.results) {
-                let status = data.results[port] ? "Open" : "Closed";
-                html += `<tr><td>${port}</td><td>${status}</td></tr>`;
+          let output = "";
+          if(tool === "portscan"){
+              // If a range scan was performed, the JSON contains a "scan_range" field.
+              if(data.scan_range) {
+                  output += "Port scan for target " + data.target + " over range " +
+                            data.scan_range.start + " to " + data.scan_range.end + ":\n";
+                  output += "Overall status: " + data.status + "\n";
+                  output += "Open ranges:\n";
+                  for (let key in data.open_ranges) {
+                      let range = data.open_ranges[key];
+                      output += "  " + range.start + " - " + range.end + "\n";
+                  }
+                  output += "Closed ranges:\n";
+                  for (let key in data.closed_ranges) {
+                      let range = data.closed_ranges[key];
+                      output += "  " + range.start + " - " + range.end + "\n";
+                  }
+              } else {
+                  output += "Port scan for target " + data.target + " on port " +
+                            data.port + " is " + (data.open ? "Open" : "Closed");
               }
-              html += `</tbody></table>`;
-            } else {
-              // Single port scan.
-              let status = data.open ? "Open" : "Closed";
-              html += `<p>Port scan for target ${data.target} on port ${data.port}: ${status}</p>`;
-            }
-            resultDiv.innerHTML = html;
           } else {
-            // For other tools, simply display the raw output in a pre block.
-            resultDiv.innerHTML = `<pre>${data.result}</pre>`;
+              output = data.result;
           }
+          document.getElementById("result").textContent = output;
         })
         .catch(error => {
-          resultDiv.innerHTML = `<pre>Error: ${error}</pre>`;
+          document.getElementById("result").textContent = "Error: " + error;
           console.error("Error:", error);
         });
     });
