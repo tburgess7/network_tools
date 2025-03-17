@@ -1,7 +1,29 @@
+// Instructions
+//
 // git clone https://github.com/ipkn/crow.git
+// Modify the file crow/include/crow/socket_adaptors.h
 // g++ -std=c++17 -O2 -I crow/include -o ntools ntools.cpp -lpthread
 
-#include "crow.h"  // Compile with -I crow/include
+/*
+Modifications needed
+Find the function (likely around line 20) that looks like this:
+
+-Remove-
+boost::asio::io_service& get_io_service() {
+    return socket_.get_io_service();
+}
+
++Add+
+boost::asio::io_context& get_io_service() {
+    return static_cast<boost::asio::io_context&>(socket_.get_executor().context());
+}
+
+*/
+
+
+
+
+#include "crow.h"
 #include <iostream>
 #include <cstdio>
 #include <array>
