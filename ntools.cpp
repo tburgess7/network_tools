@@ -1,3 +1,4 @@
+// git clone https://github.com/ipkn/crow.git
 // g++ -std=c++17 -O2 -I crow/include -o ntools ntools.cpp -lpthread
 
 #include "crow.h"  // Compile with -I crow/include
