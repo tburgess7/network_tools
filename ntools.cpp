@@ -457,7 +457,10 @@ int main() {
             return res;
         });
 
-    // Run the server on port 18080 with multithreading enabled.
-    app.port(18080).multithreaded().run();
+    // Run the server on port 18080 with multithreading enabled. - allows outside connections access to the api
+    //app.port(18080).multithreaded().run();
+    
+    // Only accessible to the localhost
+    app.bindaddr("127.0.0.1").port(18080).multithreaded().run();
     return 0;
 }
