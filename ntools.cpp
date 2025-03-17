@@ -1,3 +1,5 @@
+// g++ -std=c++17 -O2 -I crow/include -o server server.cpp -lpthread
+
 #include "crow.h"  // Compile with -I crow/include
 #include <iostream>
 #include <cstdio>
