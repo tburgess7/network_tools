@@ -20,9 +20,6 @@ boost::asio::io_context& get_io_service() {
 
 */
 
-
-
-
 #include "crow.h"
 #include <iostream>
 #include <cstdio>
